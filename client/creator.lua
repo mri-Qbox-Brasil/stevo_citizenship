@@ -10,11 +10,42 @@ local newOption = {
     value = false
 }
 
+local whitelistBusy = false
+local whitelistThreadActive = false
+
 local function ifThen(condition, ifTrue, ifFalse)
     if condition then
         return ifTrue
     end
     return ifFalse
+end
+
+local function setWhitelistBusy(state)
+    whitelistBusy = state
+    SetNuiFocus(state, state)
+    SetNuiFocusKeepInput(false)
+end
+
+local function startWhitelistThread()
+    if whitelistThreadActive then
+        return
+    end
+
+    whitelistThreadActive = true
+    CreateThread(function()
+        while whitelistThreadActive do
+            if whitelistBusy then
+                SetNuiFocus(true, true)
+                Wait(0)
+            else
+                Wait(250)
+            end
+        end
+    end)
+end
+
+local function stopWhitelistThread()
+    whitelistThreadActive = false
 end
 
 local function OnExit()
@@ -569,34 +600,46 @@ local function GetIdentifier(title)
     return input
 end
 
+local function processWhitelistAction(title, callbackName, successMessage, args)
+    startWhitelistThread()
+    setWhitelistBusy(true)
+
+    local ok, err = pcall(function()
+        local input = GetIdentifier(title)
+        if not input then
+            return
+        end
+
+        local identifier = input[1]
+        if tonumber(identifier) then
+            identifier = tonumber(identifier)
+        end
+
+        if lib.callback.await(callbackName, false, identifier) then
+            lib.notify({description = successMessage, type = "success"})
+        end
+    end)
+
+    setWhitelistBusy(false)
+
+    if not ok then
+        print(string.format("[mri_Qwhitelist] %s", err))
+        lib.notify({description = "Falha ao processar a whitelist.", type = "error"})
+    end
+
+    stopWhitelistThread()
+
+    if args and args.callback then
+        args.callback()
+    end
+end
+
 local function AddWhitelist(args)
-    local input = GetIdentifier("Adicionar Whitelist")
-    if not input then
-        return
-    end
-    local identifier = input[1]
-    if tonumber(identifier) then
-        identifier = tonumber(identifier)
-    end
-    if lib.callback.await("mri_Qwhitelist:Server:AddCitizenship", false, identifier) then
-        lib.notify({description = "Whitelist adicionada com sucesso!", type = "success"})
-    end
-    args.callback()
+    processWhitelistAction("Adicionar Whitelist", "mri_Qwhitelist:Server:AddCitizenship", "Whitelist adicionada com sucesso!", args)
 end
 
 local function RemoveWhitelist(args)
-    local input = GetIdentifier("Revogar Whitelist")
-    if not input then
-        return
-    end
-    local identifier = input[1]
-    if tonumber(identifier) then
-        identifier = tonumber(identifier)
-    end
-    if lib.callback.await("mri_Qwhitelist:Server:RemoveCitizenship", false, identifier) then
-        lib.notify({description = "Whitelist revogada com sucesso!", type = "success"})
-    end
-    args.callback()
+    processWhitelistAction("Revogar Whitelist", "mri_Qwhitelist:Server:RemoveCitizenship", "Whitelist revogada com sucesso!", args)
 end
 
 function manageCitizenship()
